@@ -1,11 +1,35 @@
+'use client';
+
 import React from 'react';
 
-import {SidebarProvider, Sidebar, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarSeparator} from '@/components/ui/sidebar';
+import {
+  SidebarProvider,
+  Sidebar,
+  SidebarContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarSeparator,
+} from '@/components/ui/sidebar';
 import {Card, CardHeader, CardTitle, CardDescription, CardContent} from '@/components/ui/card';
 import {Icons} from '@/components/icons';
 import {Button} from '@/components/ui/button';
-import {AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction} from '@/components/ui/alert-dialog';
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog';
 import {toast} from '@/hooks/use-toast';
+import {LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer} from 'recharts';
 
 export default function Home() {
   const handleAlert = () => {
@@ -14,6 +38,16 @@ export default function Home() {
       description: 'The predicted price reached the specified threshold.',
     });
   };
+
+  const data = [
+    {name: 'Jan', price: 74.0},
+    {name: 'Feb', price: 74.5},
+    {name: 'Mar', price: 73.2},
+    {name: 'Apr', price: 75.8},
+    {name: 'May', price: 76.1},
+    {name: 'Jun', price: 77.9},
+    {name: 'Jul', price: 78.5},
+  ];
 
   return (
     <SidebarProvider>
@@ -85,58 +119,76 @@ export default function Home() {
           </SidebarContent>
         </Sidebar>
 
-        <main className="flex-1 p-4">
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            <Card>
+        <main className="flex-1 p-6">
+          <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            <Card className="shadow-md rounded-lg">
               <CardHeader>
-                <CardTitle>Predicted Price</CardTitle>
-                <CardDescription>Bi-LSTM Model Prediction</CardDescription>
+                <CardTitle className="text-2xl font-bold">Predicted Price</CardTitle>
+                <CardDescription className="text-sm text-muted-foreground">
+                  Bi-LSTM Model Prediction
+                </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-semibold">$78.50</div>
+              <CardContent className="text-center">
+                <div className="text-3xl font-semibold text-primary">$78.50</div>
                 <div className="text-sm text-muted-foreground">Next 24 hours</div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="shadow-md rounded-lg">
               <CardHeader>
-                <CardTitle>Sentiment Analysis</CardTitle>
-                <CardDescription>Social Media Sentiment</CardDescription>
+                <CardTitle className="text-2xl font-bold">Sentiment Analysis</CardTitle>
+                <CardDescription className="text-sm text-muted-foreground">
+                  Social Media Sentiment
+                </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="text-xl font-semibold">Positive</div>
+              <CardContent className="text-center">
+                <div className="text-2xl font-semibold text-green-500">Positive</div>
                 <div className="text-sm text-muted-foreground">Reddit, Twitter</div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="shadow-md rounded-lg">
               <CardHeader>
-                <CardTitle>Technical Indicators</CardTitle>
-                <CardDescription>Key Indicators Overview</CardDescription>
+                <CardTitle className="text-2xl font-bold">Technical Indicators</CardTitle>
+                <CardDescription className="text-sm text-muted-foreground">
+                  Key Indicators Overview
+                </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="text-center">
                 <div className="text-xl font-semibold">RSI: 65</div>
                 <div className="text-sm text-muted-foreground">Neutral</div>
               </CardContent>
             </Card>
           </div>
 
-          <div className="mt-6">
-            <Card>
+          <div className="mt-8">
+            <Card className="shadow-md rounded-lg">
               <CardHeader>
-                <CardTitle>Interactive Chart</CardTitle>
-                <CardDescription>LTC Price and Indicators</CardDescription>
+                <CardTitle className="text-2xl font-bold">Interactive Chart</CardTitle>
+                <CardDescription className="text-sm text-muted-foreground">
+                  LTC Price and Indicators
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <img src="https://picsum.photos/800/400" alt="Interactive Chart" className="rounded-md" />
+                <ResponsiveContainer width="100%" height={400}>
+                  <LineChart data={data} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="price" stroke="#82ca9d" />
+                  </LineChart>
+                </ResponsiveContainer>
               </CardContent>
             </Card>
           </div>
 
-          <div className="mt-6">
+          <div className="mt-8">
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="outline">Set Price Alert</Button>
+                <Button variant="outline" className="rounded-full">
+                  Set Price Alert
+                </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
