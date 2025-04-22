@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 import {
   SidebarProvider,
@@ -15,6 +15,7 @@ import {
   SidebarSeparator,
 } from '@/components/ui/sidebar';
 import {Card, CardHeader, CardTitle, CardDescription, CardContent} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import {Icons} from '@/components/icons';
 import {Button} from '@/components/ui/button';
 import {
@@ -31,23 +32,96 @@ import {
 import {toast} from '@/hooks/use-toast';
 import {LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer} from 'recharts';
 
+import { getHistoricalPrice, HistoricalPrice, getBiLSTMPrediction } from '@/services/coingecko';
+import { calculateTechnicalIndicators, TechnicalIndicators } from '@/services/coingecko';
+import { getLitecoinOnChainMetrics, getLitecoinSentiment } from '@/services/coingecko';
+
+type OnChainMetrics = {
+  transactions: number;
+  volume: number;
+  activeAddresses: number;
+} | null;
+
+type SentimentData = { sentiment: string; score: number } | null;
+
 export default function Home() {
+  const [alertThreshold, setAlertThreshold] = useState<number | null>(null);
+
   const handleAlert = () => {
+    if (alertThreshold === null) {
+        toast({ title: "Alerta configurada", description: "Por favor, ingresa un precio umbral" });
+        return;
+    }
     toast({
-      title: 'Alert triggered!',
-      description: 'The predicted price reached the specified threshold.',
+      title: 'Alerta configurada',
+      description: `Se te notificará cuando el precio predicho supere los $${alertThreshold.toFixed(2)}`,
     });
   };
 
-  const data = [
-    {name: 'Jan', price: 74.0},
-    {name: 'Feb', price: 74.5},
-    {name: 'Mar', price: 73.2},
-    {name: 'Apr', price: 75.8},
-    {name: 'May', price: 76.1},
-    {name: 'Jun', price: 77.9},
-    {name: 'Jul', price: 78.5},
-  ];
+
+  const [historicalData, setHistoricalData] = useState<
+    { name: string; price: number }[]
+  >([]);
+  const [predictedPrice, setPredictedPrice] = useState<number | null>(null);
+  const [technicalIndicators, setTechnicalIndicators] = useState<TechnicalIndicators | null>(null);
+  const [onChainMetrics, setOnChainMetrics] = useState<OnChainMetrics>(null);
+  const [sentimentData, setSentimentData] = useState<SentimentData>(null);
+
+  useEffect(() => {
+    const fetchHistoricalData = async () => {
+      
+      const data = await getHistoricalPrice('litecoin', 'usd', 30);
+      
+      const formattedData = data.map((item: HistoricalPrice) => ({
+        name: formatDate(item.timestamp),
+        price: item.price,
+      }));
+
+      const indicators = calculateTechnicalIndicators(data);
+      setTechnicalIndicators(indicators);
+
+      const macdData = indicators.macd.map((macdValue, index) => ({
+        macd: macdValue.MACD,
+        signal: macdValue.signal,
+        histogram: macdValue.histogram
+      }));
+
+      const chartData = indicators.sma.map((smaValue, index) => ({
+        name: formattedData[index].name,
+        price: formattedData[index].price,
+        sma: smaValue,
+        macd: macdData[index]?.macd ?? 0,
+        signal: macdData[index]?.signal ?? 0,
+        histogram: macdData[index]?.histogram ?? 0,
+      }));
+      setHistoricalData(chartData);
+
+      const prediction = await getBiLSTMPrediction(data)
+      setPredictedPrice(prediction)
+
+      const onChain = await getLitecoinOnChainMetrics();
+      setOnChainMetrics(onChain);
+      const sentiment = await getLitecoinSentiment();
+      setSentimentData(sentiment);
+    };
+    fetchHistoricalData();
+  }, []);
+
+  
+  
+
+
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0'); // Month is 0-indexed
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+
+
 
   return (
     <SidebarProvider>
@@ -129,17 +203,32 @@ export default function Home() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="text-center">
-                <div className="text-3xl font-semibold text-primary">$78.50</div>
+                <div className="text-3xl font-semibold text-primary">{predictedPrice !== null && predictedPrice !== undefined ? `$${predictedPrice.toFixed(2)}` : "Loading..."}</div>
                 <div className="text-sm text-muted-foreground">Next 24 hours</div>
               </CardContent>
             </Card>
-
             <Card className="shadow-md rounded-lg">
               <CardHeader>
-                <CardTitle className="text-2xl font-bold">Sentiment Analysis</CardTitle>
+                <CardTitle className="text-2xl font-bold">On-Chain Metrics</CardTitle>
                 <CardDescription className="text-sm text-muted-foreground">
-                  Social Media Sentiment
+                  Litecoin Blockchain Activity
                 </CardDescription>
+              </CardHeader>
+              <CardContent className="text-center">
+                {onChainMetrics ? (
+                  <>
+                    <div className="text-xl font-semibold">Transactions: {onChainMetrics.transactions}</div>
+                    <div className="text-xl font-semibold">Volume: {onChainMetrics.volume}</div>
+                    <div className="text-xl font-semibold">Active Addresses: {onChainMetrics.activeAddresses}</div>
+                  </>
+                ) : (
+                  "Loading..."
+                )}
+              </CardContent>
+            </Card>
+            <Card className="shadow-md rounded-lg">
+              <CardHeader>
+                <CardTitle className="text-2xl font-bold">Market Sentiment</CardTitle>
               </CardHeader>
               <CardContent className="text-center">
                 <div className="text-2xl font-semibold text-green-500">Positive</div>
@@ -149,13 +238,25 @@ export default function Home() {
 
             <Card className="shadow-md rounded-lg">
               <CardHeader>
+              <CardTitle className="text-2xl font-bold">Market Sentiment</CardTitle>
+              <CardDescription className="text-sm text-muted-foreground">Social Media & News Sentiment</CardDescription>
+              </CardHeader>
+              <CardContent className="text-center">
+                {sentimentData ? (
+                  <><div className={`text-2xl font-semibold ${sentimentData.sentiment === "Positivo" ? "text-green-500" : sentimentData.sentiment === "Negativo" ? "text-red-500" : ""}`}>{sentimentData.sentiment}</div>
+                  <div className="text-sm text-muted-foreground">(Score: {sentimentData.score})</div></>
+                ) : "Loading..."}
+              </CardContent>
+            </Card>
+            <Card className="shadow-md rounded-lg">
+              <CardHeader>
                 <CardTitle className="text-2xl font-bold">Technical Indicators</CardTitle>
                 <CardDescription className="text-sm text-muted-foreground">
                   Key Indicators Overview
                 </CardDescription>
               </CardHeader>
               <CardContent className="text-center">
-                <div className="text-xl font-semibold">RSI: 65</div>
+                <div className="text-xl font-semibold">RSI: {technicalIndicators?.rsi.slice(-1)[0] || 'N/A'}</div>
                 <div className="text-sm text-muted-foreground">Neutral</div>
               </CardContent>
             </Card>
@@ -171,12 +272,16 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={400}>
-                  <LineChart data={data} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
+                  <LineChart data={historicalData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" />
                     <YAxis />
                     <Tooltip />
                     <Line type="monotone" dataKey="price" stroke="#82ca9d" />
+                    <Line type="monotone" dataKey="macd" stroke="#ff7300" />
+                    <Line type="monotone" dataKey="signal" stroke="#387908" />
+                    <Line type="monotone" dataKey="histogram" stroke="#8884d8" />                
+                    {technicalIndicators?.sma && <Line type="monotone" dataKey="sma" stroke="#8884d8" />}
                   </LineChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -195,6 +300,16 @@ export default function Home() {
                   <AlertDialogTitle>Set Price Alert</AlertDialogTitle>
                   <AlertDialogDescription>
                     Receive notifications when the predicted price reaches a specified threshold.
+                    <Input
+                      type="number"
+                      placeholder="Precio umbral"
+                      value={alertThreshold !== null ? alertThreshold : ''}
+                      onChange={(e) => {
+                        setAlertThreshold(Number(e.target.value));
+                      }}
+                      className="mt-4"
+                    />
+                    
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

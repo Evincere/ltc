@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bar, Line } from "recharts"
 import * as RechartsPrimitive from "recharts"
 
 import { cn } from "@/lib/utils"
@@ -14,6 +15,9 @@ export type ChartConfig = {
     icon?: React.ComponentType
   } & (
     | { color?: string; theme?: never }
+    | { color?: string, type: 'line', dataKey: string }
+    | { color?: string, type: 'bar', dataKey: string}
+
     | { color?: never; theme: Record<keyof typeof THEMES, string> }
   )
 }
@@ -40,7 +44,7 @@ const ChartContainer = React.forwardRef<
     config: ChartConfig
     children: React.ComponentProps<
       typeof RechartsPrimitive.ResponsiveContainer
-    >["children"]
+    >["children"] & {data: any[]}
   }
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId()
@@ -59,7 +63,9 @@ const ChartContainer = React.forwardRef<
       >
         <ChartStyle id={chartId} config={config} />
         <RechartsPrimitive.ResponsiveContainer>
-          {children}
+          {React.Children.map(children, child => {
+            return React.cloneElement(child, { data: props.data })
+          })}
         </RechartsPrimitive.ResponsiveContainer>
       </div>
     </ChartContext.Provider>
@@ -96,6 +102,23 @@ ${colorConfig
           )
           .join("\n"),
       }}
+    />
+  )
+}
+
+
+export const MACDChart = ({ data, config }: { data: any[], config: ChartConfig}) => {
+  return (
+    <>
+    <RechartsPrimitive.Line dataKey="macd" stroke={config["macd"]?.color || "#000"} />
+    <RechartsPrimitive.Line dataKey="signal" stroke={config["signal"]?.color || "#8884d8"} />
+    <RechartsPrimitive.Bar dataKey="histogram" fill={config["histogram"]?.color || "#82ca9d"} />
+    </>
+  )
+}
+
+export const LineChart = RechartsPrimitive.LineChart
+export const CartesianGrid = RechartsPrimitive.CartesianGrid
     />
   )
 }
@@ -258,6 +281,8 @@ ChartTooltipContent.displayName = "ChartTooltip"
 
 const ChartLegend = RechartsPrimitive.Legend
 
+
+
 const ChartLegendContent = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div"> &
@@ -361,5 +386,7 @@ export {
   ChartTooltipContent,
   ChartLegend,
   ChartLegendContent,
+  MACDChart,
+  LineChart,
   ChartStyle,
 }
