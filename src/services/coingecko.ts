@@ -37,29 +37,32 @@ export async function getHistoricalPrice(
   currency: string,
   days: number
 ): Promise<HistoricalPrice[]> {  
-  const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?vs_currency=${currency}&days=${days}`;
+  const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=${currency}&days=${days}&interval=daily`;
 
-  const response = await fetch(url);
-  const data = await response.json();
+  try {
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`Error en la API de CoinGecko: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const historicalData: HistoricalPrice[] = [];
 
-  const historicalData: HistoricalPrice[] = [];
-  
-  // Check if the API response has the expected structure
-  if (data && data.market_data && data.market_data.current_price) {
-    historicalData.push({
-        timestamp: data.market_data.current_price.last_updated_at,
-        price: data.market_data.current_price[currency]
-    })
+    if (data && data.prices && Array.isArray(data.prices)) {
+      data.prices.forEach((priceData: [number, number]) => {
+        historicalData.push({
+          timestamp: priceData[0],
+          price: priceData[1]
+        });
+      });
+    }
+
+    return historicalData;
+  } catch (error) {
+    console.error('Error al obtener datos históricos:', error);
+    return [];
   }
-
-  // Check if the API response has the expected structure  
-  if (data && data.market_data && data.market_data.prices) {
-    data.market_data.prices.forEach((priceData: [number, number]) => {
-      historicalData.push({ timestamp: priceData[0], price: priceData[1] });
-    });
-  }
-
-  return historicalData;
 }
 
 export function calculateTechnicalIndicators(historicalPrices: HistoricalPrice[]): TechnicalIndicators {
@@ -80,7 +83,7 @@ export function calculateTechnicalIndicators(historicalPrices: HistoricalPrice[]
     SimpleMAOscillator: false,
     SimpleMASignal: false,
   });
-  const sma = SMA.calculate({ values: prices, period: smaPeriod });
+  const sma = TechnicalIndicators.SMA.calculate({ values: prices, period: smaPeriod });
 
   // Make sure all indicators have the same length as the data
   const rsiPadding = prices.length - rsi.length;
