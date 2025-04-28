@@ -31,18 +31,44 @@ import {
 } from '@/components/ui/alert-dialog';
 import {toast} from '@/hooks/use-toast';
 import {LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer} from 'recharts';
+import { ThemeToggle } from "@/components/theme-toggle"
+import { PriceChart } from "@/components/charts/price-chart"
+import { TechnicalIndicators } from "@/components/indicators/technical-indicators"
+import { WidgetLayout } from "@/components/dashboard/widgets/widget-layout"
+import { PriceWidget } from "@/components/dashboard/widgets/price-widget"
+import { IndicatorsWidget } from "@/components/dashboard/widgets/indicators-widget"
+import { AlertsWidget } from "@/components/dashboard/alerts/alerts-widget"
+import { NotificationCenter } from "@/components/notifications/notification-center"
+import { SentimentWidget } from "@/components/dashboard/sentiment/sentiment-widget"
+import { CorrelationAnalysis } from "@/components/analysis/CorrelationAnalysis"
 
-import { getHistoricalPrice, HistoricalPrice, getBiLSTMPrediction } from '@/services/coingecko';
-import { calculateTechnicalIndicators, TechnicalIndicators } from '@/services/coingecko';
-import { getLitecoinOnChainMetrics, getLitecoinSentiment } from '@/services/coingecko';
+import { getHistoricalPrice, getBiLSTMPrediction, calculateTechnicalIndicators, getLitecoinOnChainMetrics, getLitecoinSentiment } from '@/services/coingecko';
+import { lstmPredictionService } from '@/services/lstm-prediction'
+import { coinmarketcapService } from '@/services/coinmarketcap-service'
+import { technicalIndicatorsService } from '@/services/technical-indicators'
+import { HistoricalPrice, TechnicalIndicators } from '@/types'
 
-type OnChainMetrics = {
-  transactions: number;
-  volume: number;
-  activeAddresses: number;
-} | null;
+interface Prediction {
+  price: number
+  confidence: number
+}
 
-type SentimentData = { sentiment: string; score: number } | null;
+interface TechnicalIndicatorsData {
+  rsi: number[]
+  macd: Array<{ MACD: number; signal: number; histogram: number }>
+  sma: number[]
+}
+
+interface OnChainMetrics {
+  transactions: number
+  volume: number
+  activeAddresses: number
+}
+
+interface SentimentData {
+  sentiment: string
+  score: number
+}
 
 export default function Home() {
   const [alertThreshold, setAlertThreshold] = useState<number | null>(null);
@@ -58,57 +84,94 @@ export default function Home() {
     });
   };
 
+  const [currentPrice, setCurrentPrice] = useState<number>(0)
+  const [predictedPrice, setPredictedPrice] = useState<number>(0)
+  const [confidence, setConfidence] = useState<number>(0)
+  const [indicators, setIndicators] = useState<TechnicalIndicators>({
+    rsi: 0,
+    macd: 0,
+    bollinger: 0
+  })
 
-  const [historicalData, setHistoricalData] = useState<
-    { name: string; price: number }[]
-  >([]);
-  const [predictedPrice, setPredictedPrice] = useState<number | null>(null);
-  const [technicalIndicators, setTechnicalIndicators] = useState<TechnicalIndicators | null>(null);
-  const [onChainMetrics, setOnChainMetrics] = useState<OnChainMetrics>(null);
-  const [sentimentData, setSentimentData] = useState<SentimentData>(null);
+  const [priceData, setPriceData] = useState<any[]>([])
+  const [historicalData, setHistoricalData] = useState<HistoricalPrice[]>([])
+  const [technicalIndicators, setTechnicalIndicators] = useState<TechnicalIndicators>({
+    rsi: 0,
+    macd: 0,
+    bollinger: 0
+  })
+  const [onChainMetrics, setOnChainMetrics] = useState<OnChainMetrics | null>(null)
+  const [sentimentData, setSentimentData] = useState<SentimentData | null>(null)
+  const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+
+  const getSignal = (value: number, threshold: number = 50): "buy" | "sell" | "neutral" => {
+    if (value > threshold + 10) return "sell"
+    if (value < threshold - 10) return "buy"
+    return "neutral"
+  }
+
+  const getStrength = (value: number, threshold: number = 50): number => {
+    return Math.min(Math.abs(value - threshold) * 2, 100)
+  }
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const price = await coinmarketcapService.getCurrentPrice()
+        setCurrentPrice(price)
+
+        const historical = await coinmarketcapService.getHistoricalData()
+        setHistoricalData(historical)
+
+        const indicators = await coinmarketcapService.getTechnicalIndicators()
+        setTechnicalIndicators(indicators)
+      } catch (error) {
+        console.error('Error fetching data:', error)
+      }
+    }
+
+    fetchData()
+    const interval = setInterval(fetchData, 60000) // Actualizar cada minuto
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     const fetchHistoricalData = async () => {
-      
-      const data = await getHistoricalPrice('litecoin', 'usd', 30);
-      
-      const formattedData = data.map((item: HistoricalPrice) => ({
-        name: formatDate(item.timestamp),
-        price: item.price,
-      }));
+      try {
+        // Obtener datos históricos de CoinMarketCap
+        const data = await coinmarketcapService.getHistoricalData(30);
 
-      const indicators = calculateTechnicalIndicators(data);
-      setTechnicalIndicators(indicators);
+        // Formatear datos para gráficos
+        const formattedData = data.map((item: HistoricalPrice) => ({
+          name: formatDate(item.timestamp),
+          price: item.price,
+        }));
 
-      const macdData = indicators.macd.map((macdValue, index) => ({
-        macd: macdValue.MACD,
-        signal: macdValue.signal,
-        histogram: macdValue.histogram
-      }));
+        // Obtener indicadores técnicos
+        const indicators = await coinmarketcapService.getTechnicalIndicators();
+        setTechnicalIndicators(indicators);
 
-      const chartData = indicators.sma.map((smaValue, index) => ({
-        name: formattedData[index].name,
-        price: formattedData[index].price,
-        sma: smaValue,
-        macd: macdData[index]?.macd ?? 0,
-        signal: macdData[index]?.signal ?? 0,
-        histogram: macdData[index]?.histogram ?? 0,
-      }));
-      setHistoricalData(chartData);
+        // Obtener predicción
+        const prediction = await lstmPredictionService.getPrediction(data);
+        setPredictedPrice(prediction.price);
+        setConfidence(prediction.confidence);
 
-      const prediction = await getBiLSTMPrediction(data)
-      setPredictedPrice(prediction)
+        // Obtener métricas on-chain
+        const onChain = await coinmarketcapService.getLitecoinOnChainMetrics();
+        setOnChainMetrics(onChain);
 
-      const onChain = await getLitecoinOnChainMetrics();
-      setOnChainMetrics(onChain);
-      const sentiment = await getLitecoinSentiment();
-      setSentimentData(sentiment);
+        // Obtener datos de sentimiento
+        const sentiment = await coinmarketcapService.getLitecoinSentiment();
+        setSentimentData(sentiment);
+      } catch (error) {
+        console.error('Error fetching historical data:', error);
+      }
     };
     fetchHistoricalData();
   }, []);
 
-  
-  
+
+
 
 
 
@@ -120,8 +183,75 @@ export default function Home() {
     return `${year}-${month}-${day}`;
   };
 
+  const handleAddWidget = () => {
+    toast({
+      title: "Agregar Widget",
+      description: "Funcionalidad en desarrollo",
+    })
+  }
 
+  const handleRemoveWidget = (widgetId: string) => {
+    toast({
+      title: "Eliminar Widget",
+      description: "Funcionalidad en desarrollo",
+    })
+  }
 
+  const handleConfigureWidget = (widgetId: string) => {
+    toast({
+      title: "Configurar Widget",
+      description: "Funcionalidad en desarrollo",
+    })
+  }
+
+  // Asegurarse de que los valores sean números y no NaN
+  const getRsiValue = () => {
+    const value = typeof technicalIndicators.rsi === 'number'
+      ? technicalIndicators.rsi
+      : Array.isArray(technicalIndicators.rsi) && technicalIndicators.rsi.length > 0
+        ? technicalIndicators.rsi[technicalIndicators.rsi.length - 1]
+        : 50;
+    return isNaN(value) ? 50 : value;
+  };
+
+  const getMacdValue = () => {
+    const value = typeof technicalIndicators.macd === 'number'
+      ? technicalIndicators.macd
+      : 0;
+    return isNaN(value) ? 0 : value;
+  };
+
+  const getBollingerValue = () => {
+    const value = typeof technicalIndicators.bollinger === 'number'
+      ? technicalIndicators.bollinger
+      : 0;
+    return isNaN(value) ? 0 : value;
+  };
+
+  const rsiValue = getRsiValue();
+  const macdValue = getMacdValue();
+  const bollingerValue = getBollingerValue();
+
+  const indicatorsData = [
+    {
+      name: 'RSI',
+      value: rsiValue,
+      signal: technicalIndicatorsService.getSignal(rsiValue, 70, 30),
+      strength: technicalIndicatorsService.getStrength(rsiValue, 50)
+    },
+    {
+      name: 'MACD',
+      value: macdValue,
+      signal: technicalIndicatorsService.getSignal(macdValue, 0, 0),
+      strength: technicalIndicatorsService.getStrength(macdValue, 0)
+    },
+    {
+      name: 'Bollinger',
+      value: bollingerValue,
+      signal: technicalIndicatorsService.getSignal(bollingerValue, 0, 0),
+      strength: technicalIndicatorsService.getStrength(bollingerValue, 0)
+    }
+  ]
 
   return (
     <SidebarProvider>
@@ -161,6 +291,36 @@ export default function Home() {
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild>
+                    <Button variant="ghost" className="justify-start" asChild>
+                      <a href="/trading">
+                        <Icons.arrowRightLeft className="mr-2 h-4 w-4" />
+                        <span>Trading Automatizado</span>
+                      </a>
+                    </Button>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Button variant="ghost" className="justify-start" asChild>
+                      <a href="/fundamental">
+                        <Icons.barChart2 className="mr-2 h-4 w-4" />
+                        <span>Análisis Fundamental</span>
+                      </a>
+                    </Button>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Button variant="ghost" className="justify-start" asChild>
+                      <a href="/reports">
+                        <Icons.fileCode className="mr-2 h-4 w-4" />
+                        <span>Reportes</span>
+                      </a>
+                    </Button>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
                     <Button variant="ghost" className="justify-start">
                       <Icons.settings className="mr-2 h-4 w-4" />
                       <span>Settings</span>
@@ -193,132 +353,41 @@ export default function Home() {
           </SidebarContent>
         </Sidebar>
 
-        <main className="flex-1 p-6">
-          <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            <Card className="shadow-md rounded-lg">
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold">Predicted Price</CardTitle>
-                <CardDescription className="text-sm text-muted-foreground">
-                  Bi-LSTM Model Prediction
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="text-center">
-                <div className="text-3xl font-semibold text-primary">{predictedPrice !== null && predictedPrice !== undefined ? `$${predictedPrice.toFixed(2)}` : "Loading..."}</div>
-                <div className="text-sm text-muted-foreground">Next 24 hours</div>
-              </CardContent>
-            </Card>
-            <Card className="shadow-md rounded-lg">
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold">On-Chain Metrics</CardTitle>
-                <CardDescription className="text-sm text-muted-foreground">
-                  Litecoin Blockchain Activity
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="text-center">
-                {onChainMetrics ? (
-                  <>
-                    <div className="text-xl font-semibold">Transactions: {onChainMetrics.transactions}</div>
-                    <div className="text-xl font-semibold">Volume: {onChainMetrics.volume}</div>
-                    <div className="text-xl font-semibold">Active Addresses: {onChainMetrics.activeAddresses}</div>
-                  </>
-                ) : (
-                  "Loading..."
-                )}
-              </CardContent>
-            </Card>
-            <Card className="shadow-md rounded-lg">
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold">Market Sentiment</CardTitle>
-              </CardHeader>
-              <CardContent className="text-center">
-                <div className="text-2xl font-semibold text-green-500">Positive</div>
-                <div className="text-sm text-muted-foreground">Reddit, Twitter</div>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-md rounded-lg">
-              <CardHeader>
-              <CardTitle className="text-2xl font-bold">Market Sentiment</CardTitle>
-              <CardDescription className="text-sm text-muted-foreground">Social Media & News Sentiment</CardDescription>
-              </CardHeader>
-              <CardContent className="text-center">
-                {sentimentData ? (
-                  <><div className={`text-2xl font-semibold ${sentimentData.sentiment === "Positivo" ? "text-green-500" : sentimentData.sentiment === "Negativo" ? "text-red-500" : ""}`}>{sentimentData.sentiment}</div>
-                  <div className="text-sm text-muted-foreground">(Score: {sentimentData.score})</div></>
-                ) : "Loading..."}
-              </CardContent>
-            </Card>
-            <Card className="shadow-md rounded-lg">
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold">Technical Indicators</CardTitle>
-                <CardDescription className="text-sm text-muted-foreground">
-                  Key Indicators Overview
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="text-center">
-                <div className="text-xl font-semibold">RSI: {technicalIndicators?.rsi.slice(-1)[0] || 'N/A'}</div>
-                <div className="text-sm text-muted-foreground">Neutral</div>
-              </CardContent>
-            </Card>
+        <main className="flex-1 p-8 overflow-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold">Dashboard</h1>
+            <div className="flex items-center space-x-4">
+              <NotificationCenter />
+              <ThemeToggle />
+            </div>
           </div>
-
-          <div className="mt-8">
-            <Card className="shadow-md rounded-lg">
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold">Interactive Chart</CardTitle>
-                <CardDescription className="text-sm text-muted-foreground">
-                  LTC Price and Indicators
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={400}>
-                  <LineChart data={historicalData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="price" stroke="#82ca9d" />
-                    <Line type="monotone" dataKey="macd" stroke="#ff7300" />
-                    <Line type="monotone" dataKey="signal" stroke="#387908" />
-                    <Line type="monotone" dataKey="histogram" stroke="#8884d8" />                
-                    {technicalIndicators?.sma && <Line type="monotone" dataKey="sma" stroke="#8884d8" />}
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="mt-8">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" className="rounded-full">
-                  Set Price Alert
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Set Price Alert</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Receive notifications when the predicted price reaches a specified threshold.
-                    <Input
-                      type="number"
-                      placeholder="Precio umbral"
-                      value={alertThreshold !== null ? alertThreshold : ''}
-                      onChange={(e) => {
-                        setAlertThreshold(Number(e.target.value));
-                      }}
-                      className="mt-4"
-                    />
-                    
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleAlert}>Confirm</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+          <WidgetLayout onAddWidget={handleAddWidget}>
+            <PriceWidget
+              currentPrice={currentPrice}
+              predictedPrice={predictedPrice}
+              confidence={confidence}
+              onRemove={() => handleRemoveWidget("price")}
+              onConfigure={() => handleConfigureWidget("price")}
+            />
+            <IndicatorsWidget
+              indicators={indicatorsData}
+              onRemove={() => handleRemoveWidget("indicators")}
+              onConfigure={() => handleConfigureWidget("indicators")}
+            />
+            <AlertsWidget
+              currentPrice={currentPrice}
+              onRemove={() => handleRemoveWidget("alerts")}
+              onConfigure={() => handleConfigureWidget("alerts")}
+            />
+            <SentimentWidget
+              onRemove={() => handleRemoveWidget("sentiment")}
+              onConfigure={() => handleConfigureWidget("sentiment")}
+            />
+            <CorrelationAnalysis
+              onRemove={() => handleRemoveWidget("correlation")}
+              onConfigure={() => handleConfigureWidget("correlation")}
+            />
+          </WidgetLayout>
         </main>
       </div>
     </SidebarProvider>
